@@ -25,7 +25,7 @@ options:
   operation:
     required: true
     aliases: [ command ]
-    choices: [ create, update, delete ]
+    choices: [ create, delete ]
     description:
       - The operation to perform.
 
@@ -52,10 +52,6 @@ options:
     description:
       - The description for the team; only applies to create and update operations.
 
-  members:
-    required: false
-    description:
-      - An optional list of team-member usernames for the create/update operations.
 
 notes:
     - 
@@ -87,13 +83,12 @@ def request(url, key, data=None, method=None):
     response, info = fetch_url(module, url, data=data, method=method,
                                headers={'Content-Type': 'application/json',
                                         'Authorization': "GenieKey %s" % key})
-    status = info['status']
 
     body = response and response.read()
     if body:
-        return status, json.loads(to_text(body, errors='surrogate_or_strict'))
+        return info, json.loads(to_text(body, errors='surrogate_or_strict'))
     else:
-        return status, {}
+        return info, {}
 
 
 def pfilter(params, keys):
@@ -102,26 +97,37 @@ def pfilter(params, keys):
              if k in params and params[k]}
 
 
+def statcheck(info, body):
+    if info['status'] in (200, 201, 204):
+        return body, True, None
+    else:
+        return body, False, info['msg']
+
+
 def create(base, key, params):
     # FIXME: Add members, or leave to individual calls?
     data = pfilter(params, ['name', 'description'])
     url = base + '/teams'
-    stat, body  = request(url, key, data=data, method='POST')
+    info, body  = request(url, key, data=data, method='POST')
 
-    if stat in (200, 201, 204):
-        return body, True, False
-    elif stat == 409:
+    if info['status'] == 409:
         # Conflict; assume team-name already exists
         return body, False, False
     else:
-        return body, False, True
+        return statcheck(info, body)
+
+
+def delete(base, key, params):
+    url = base + '/teams/' + params['name'] + '?identifierType=name'
+    info, body  = request(url, key, method='DELETE')
+    return statcheck(info, body)
 
 
 def main():
     global module
     module = AnsibleModule(
         argument_spec=dict(
-            operation=dict(choices=['create', 'update', 'delete'],
+            operation=dict(choices=['create', 'delete'],
                            aliases=['command'], required=True),
             key=dict(aliases=['apikey'], required=True, no_log=True),
             region=dict(required=False, default='US'),
@@ -146,16 +152,16 @@ def main():
         thismod = sys.modules[__name__]
         func = getattr(thismod, op)
 
-        ret, changed, fail = func(base, key, module.params)
+        body, changed, fail = func(base, key, module.params)
 
         if fail:
-            module.fail_json(body)
+            module.fail_json(msg=fail)
 
 
     except Exception as e:
         return module.fail_json(msg=e.message)
 
-    module.exit_json(changed=changed, meta=ret)
+    module.exit_json(changed=changed, meta=body)
 
 if __name__ == '__main__':
     main()
