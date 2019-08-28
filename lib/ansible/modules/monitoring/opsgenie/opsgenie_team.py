@@ -84,6 +84,21 @@ EXAMPLES = '''
     name: 'dummy_group'
     key: "{{ my_opsgenie_key }}"
 
+# Add a user to a team as admin
+- opsgenie_team:
+  operation: add_member
+    name: 'member_group'
+    user: 'ssmith+opsgenie@haltcondition.net'
+    role: 'admin'
+    key: "{{ my_opsgenie_key }}"
+
+# Remove a user from a team
+- opsgenie_team:
+    operation: remove_member
+    name: 'member_group'
+    user: 'ssmith+opsgenie@haltcondition.net'
+    key: "{{ my_opsgenie_key }}"
+
 '''
 
 ######################################################################
