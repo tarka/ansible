@@ -5,6 +5,12 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
+
+import json
+import sys
+from ansible.module_utils.opsgenie import request, pfilter, statcheck, checkop
+from ansible.module_utils.basic import AnsibleModule
+
 __metaclass__ = type
 
 ANSIBLE_METADATA = {'metadata_version': '1.1',
@@ -80,60 +86,6 @@ EXAMPLES = '''
 
 '''
 
-import base64
-import json
-import sys
-from ansible.module_utils._text import to_text, to_bytes
-
-from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.urls import fetch_url
-
-REGION_URL = {
-    'US': 'https://api.opsgenie.com/v2',
-    'EU': 'https://api.eu.opsgenie.com/v2'
-}
-
-
-######################################################################
-# Utils
-
-def request(url, key, data=None, method=None):
-    if data:
-        data = json.dumps(data)
-
-    response, info = fetch_url(module, url, data=data, method=method,
-                               headers={'Content-Type': 'application/json',
-                                        'Authorization': "GenieKey %s" % key})
-
-    body = response and response.read()
-    if body:
-        return info, json.loads(to_text(body, errors='surrogate_or_strict'))
-    else:
-        return info, {}
-
-
-def pfilter(params, keys):
-    return { k: params[k]
-             for k in keys
-             if k in params and params[k]}
-
-
-def statcheck(info, body):
-    if info['status'] in (200, 201, 204):
-        return body, True, None
-    else:
-        return body, False, info['msg']
-
-def checkop(op, params, required):
-    # Check we have the necessary per-operation parameters
-    missing = []
-    for parm in required[op]:
-        if not params[parm]:
-            missing.append(parm)
-    if missing:
-        module.fail_json(msg="Operation %s require the following missing parameters: %s" % (op, ",".join(missing)))
-
-
 ######################################################################
 # Operations:
 # Each op should take a base URL, key and the params. It should return
@@ -148,11 +100,11 @@ OP_REQUIRED = dict(
 )
 
 
-def create(base, key, params):
+def create(module):
     # FIXME: Add members, or leave to individual calls?
-    data = pfilter(params, ['name', 'description'])
-    url = base + '/teams'
-    info, body  = request(url, key, data=data, method='POST')
+    data = pfilter(module.params, ['name', 'description'])
+    endpoint = '/teams'
+    info, body  = request(module, endpoint, data=data, method='POST')
 
     if info['status'] == 409:
         # Conflict; assume team-name already exists
@@ -161,37 +113,36 @@ def create(base, key, params):
         return statcheck(info, body)
 
 
-def delete(base, key, params):
-    url = base + '/teams/' + params['name'] + '?identifierType=name'
-    info, body  = request(url, key, method='DELETE')
+def delete(module):
+    endpoint = '/teams/' + module.params['name'] + '?identifierType=name'
+    info, body = request(module, endpoint, method='DELETE')
     return statcheck(info, body)
 
 
-def add_member(base, key, params):
+def add_member(module):
     # TODO: Add always returns 'Added', even if the user was already
     # a member. Ideally we should check for this and quit with
     # changed=false.
-    url = base + '/teams/' + params['name'] + '/members?teamIdentifierType=name'
+    endpoint = '/teams/' + module.params['name'] + '/members?teamIdentifierType=name'
     data = {
         'user': {
-            'username': params['user']
+            'username': module.params['user']
         },
-        'role': params['role']
+        'role': module.params['role']
     }
 
-    info, body  = request(url, key, data=data, method='POST')
+    info, body  = request(module, endpoint, data=data, method='POST')
 
     return statcheck(info, body)
 
 
-def remove_member(base, key, params):
-    url = base + '/teams/' + params['name'] + '/members/' + params['user'] + '?teamIdentifierType=name'
-    info, body  = request(url, key, method='DELETE')
+def remove_member(module):
+    endpoint = '/teams/' + module.params['name'] + '/members/' + module.params['user'] + '?teamIdentifierType=name'
+    info, body  = request(module, endpoint, method='DELETE')
     return statcheck(info, body)
 
 
 def main():
-    global module
     module = AnsibleModule(
         argument_spec=dict(
             operation=dict(choices=['create', 'delete', 'add_member', 'remove_member'],
@@ -206,25 +157,21 @@ def main():
         ),
         supports_check_mode=False
     )
+    checkop(module, OP_REQUIRED)
 
     op = module.params['operation']
-    key = module.params['key']
-    region = module.params['region']
-    base = REGION_URL[region]
-
-    checkop(op, module.params, OP_REQUIRED)
 
     # Dispatch:
     # FIXME: This could be a getattr lookup, but it wasn't playing
     # well with the Ansible wrapper, so this works for now.
     if op == 'create':
-        body, changed, fail = create(base, key, module.params)
+        body, changed, fail = create(module)
     elif op == 'delete':
-        body, changed, fail = delete(base, key, module.params)
+        body, changed, fail = delete(module)
     elif op == 'add_member':
-        body, changed, fail = add_member(base, key, module.params)
+        body, changed, fail = add_member(module)
     elif op == 'remove_member':
-        body, changed, fail = remove_member(base, key, module.params)
+        body, changed, fail = remove_member(module)
     else:
         return module.fail_json(msg="Unknown operation")
 
