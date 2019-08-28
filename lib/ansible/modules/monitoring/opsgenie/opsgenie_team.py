@@ -25,7 +25,7 @@ options:
   operation:
     required: true
     aliases: [ command ]
-    choices: [ create, delete ]
+    choices: [ create, delete, add_member, remove_member ]
     description:
       - The operation to perform.
 
@@ -51,6 +51,16 @@ options:
     required: false
     description:
       - The description for the team; only applies to create and update operations.
+
+  user:
+    required: false
+    description:
+      - The team member to add or remove. Required for those operations.
+
+  role:
+    required: false
+    description:
+      - The role for the team member being added. Required for that operation.
 '''
 
 EXAMPLES = '''
@@ -84,6 +94,9 @@ REGION_URL = {
 }
 
 
+######################################################################
+# Utils
+
 def request(url, key, data=None, method=None):
     if data:
         data = json.dumps(data)
@@ -111,11 +124,29 @@ def statcheck(info, body):
     else:
         return body, False, info['msg']
 
+def checkop(op, params, required):
+    # Check we have the necessary per-operation parameters
+    missing = []
+    for parm in required[op]:
+        if not params[parm]:
+            missing.append(parm)
+    if missing:
+        module.fail_json(msg="Operation %s require the following missing parameters: %s" % (op, ",".join(missing)))
+
 
 ######################################################################
 # Operations:
 # Each op should take a base URL, key and the params. It should return
 # (body, changed, failed). See 'Dispatch' below for the invocation.
+
+# Some parameters are required depending on the operation:
+OP_REQUIRED = dict(
+    create=[],
+    delete=[],
+    add_member=['user', 'role'],
+    remove_member=['user'],
+)
+
 
 def create(base, key, params):
     # FIXME: Add members, or leave to individual calls?
@@ -136,17 +167,42 @@ def delete(base, key, params):
     return statcheck(info, body)
 
 
+def add_member(base, key, params):
+    # TODO: Add always returns 'Added', even if the user was already
+    # a member. Ideally we should check for this and quit with
+    # changed=false.
+    url = base + '/teams/' + params['name'] + '/members?teamIdentifierType=name'
+    data = {
+        'user': {
+            'username': params['user']
+        },
+        'role': params['role']
+    }
+
+    info, body  = request(url, key, data=data, method='POST')
+
+    return statcheck(info, body)
+
+
+def remove_member(base, key, params):
+    url = base + '/teams/' + params['name'] + '/members/' + params['user'] + '?teamIdentifierType=name'
+    info, body  = request(url, key, method='DELETE')
+    return statcheck(info, body)
+
+
 def main():
     global module
     module = AnsibleModule(
         argument_spec=dict(
-            operation=dict(choices=['create', 'delete'],
+            operation=dict(choices=['create', 'delete', 'add_member', 'remove_member'],
                            aliases=['command'], required=True),
             key=dict(aliases=['apikey'], required=True, no_log=True),
             region=dict(required=False, default='US'),
-
             name=dict(required=True),
+
             description=dict(required=False),
+            user=dict(required=False),
+            role=dict(required=False),
         ),
         supports_check_mode=False
     )
@@ -156,6 +212,8 @@ def main():
     region = module.params['region']
     base = REGION_URL[region]
 
+    checkop(op, module.params, OP_REQUIRED)
+
     # Dispatch:
     # FIXME: This could be a getattr lookup, but it wasn't playing
     # well with the Ansible wrapper, so this works for now.
@@ -163,6 +221,10 @@ def main():
         body, changed, fail = create(base, key, module.params)
     elif op == 'delete':
         body, changed, fail = delete(base, key, module.params)
+    elif op == 'add_member':
+        body, changed, fail = add_member(base, key, module.params)
+    elif op == 'remove_member':
+        body, changed, fail = remove_member(base, key, module.params)
     else:
         return module.fail_json(msg="Unknown operation")
 
