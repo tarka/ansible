@@ -51,13 +51,22 @@ options:
     required: false
     description:
       - The description for the team; only applies to create and update operations.
-
-
-notes:
-    - 
 '''
 
 EXAMPLES = '''
+# Create an Opsgenie team
+- opsgenie_team:
+    operation: create
+    name: 'dummy_group'
+    description: "A dummy Group"
+    key: "{{ my_opsgenie_key }}"
+  register: team_meta
+
+# Delete the group
+- opsgenie_team:
+    operation: delete
+    name: 'dummy_group'
+    key: "{{ my_opsgenie_key }}"
 
 '''
 
@@ -68,7 +77,6 @@ from ansible.module_utils._text import to_text, to_bytes
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.urls import fetch_url
-
 
 REGION_URL = {
     'US': 'https://api.opsgenie.com/v2',
@@ -103,6 +111,11 @@ def statcheck(info, body):
     else:
         return body, False, info['msg']
 
+
+######################################################################
+# Operations:
+# Each op should take a base URL, key and the params. It should return
+# (body, changed, failed). See 'Dispatch' below for the invocation.
 
 def create(base, key, params):
     # FIXME: Add members, or leave to individual calls?
@@ -143,23 +156,15 @@ def main():
     region = module.params['region']
     base = REGION_URL[region]
 
-    # Dispatch
-    try:
-        # Lookup the corresponding method for this operation. This is
-        # safe as the AnsibleModule should remove any unknown
-        # operations. Each op should take a base URL, key and the
-        # params. It should return (body, changed, failed).
-        thismod = sys.modules[__name__]
-        func = getattr(thismod, op)
-
-        body, changed, fail = func(base, key, module.params)
-
-        if fail:
-            module.fail_json(msg=fail)
-
-
-    except Exception as e:
-        return module.fail_json(msg=e.message)
+    # Dispatch:
+    # FIXME: This could be a getattr lookup, but it wasn't playing
+    # well with the Ansible wrapper, so this works for now.
+    if op == 'create':
+        body, changed, fail = create(base, key, module.params)
+    elif op == 'delete':
+        body, changed, fail = delete(base, key, module.params)
+    else:
+        return module.fail_json(msg="Unknown operation")
 
     module.exit_json(changed=changed, meta=body)
 
