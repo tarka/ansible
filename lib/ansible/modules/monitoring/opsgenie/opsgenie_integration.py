@@ -31,7 +31,7 @@ options:
   operation:
     required: true
     aliases: [ command ]
-    choices: [ create, delete ]
+    choices: [ create ]
     description:
       - The operation to perform.
 
@@ -70,7 +70,13 @@ options:
 '''
 
 EXAMPLES = '''
-
+# Create a CloudWatch integration for an existing group.
+- opsgenie_integration:
+    operation: create
+    name: 'CW'
+    type: "CloudWatch"
+    owner: "integration_group"
+    key: "{{ my_opsgenie_key }}"
 '''
 
 ######################################################################
@@ -81,17 +87,15 @@ EXAMPLES = '''
 # Some parameters are required depending on the operation:
 OP_REQUIRED = dict(
     create=['type', 'owner'],
-    delete=[],
 )
 
 
 def create(module):
     data = pfilter(module.params, ['name', 'type'])
-    data.update(module.params.get('parameters', {}))
+    data.update(module.params.get('parameters') or {})
     data['ownerTeam'] = {
         'name': module.params['owner']
     }
-
     endpoint = '/integrations'
     info, body  = request(module, endpoint, data=data, method='POST')
 
@@ -101,7 +105,7 @@ def create(module):
 def main():
     module = AnsibleModule(
         argument_spec=dict(
-            operation=dict(choices=['create', 'delete'],
+            operation=dict(choices=['create'],
                            aliases=['command'], required=True),
             key=dict(aliases=['apikey'], required=True, no_log=True),
             region=dict(required=False, default='US'),
@@ -109,6 +113,7 @@ def main():
 
             type=dict(required=False),
             owner=dict(required=False),
+            parameters=dict(required=False, type='dict'),
         ),
         supports_check_mode=False
     )
@@ -121,12 +126,6 @@ def main():
     # well with the Ansible wrapper, so this works for now.
     if op == 'create':
         body, changed, fail = create(module)
-    elif op == 'delete':
-        body, changed, fail = delete(module)
-    elif op == 'add_member':
-        body, changed, fail = add_member(module)
-    elif op == 'remove_member':
-        body, changed, fail = remove_member(module)
     else:
         return module.fail_json(msg="Unknown operation")
 
