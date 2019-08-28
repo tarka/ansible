@@ -58,7 +58,7 @@ options:
     description:
       - The integration type; required  when creating an integration.
 
-  ownner:
+  owner:
     required: false
     description:
       - The team that owns the integration; required  when creating an integration.
